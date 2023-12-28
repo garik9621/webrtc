@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express')
 const app = express()
 const server = require('http').createServer(app);
@@ -10,7 +11,7 @@ const PORT = process.env.PORT || 3001;
 function getClientRooms() {
     const {rooms} = io.sockets.adapter;
 
-    return Array.from(rooms.keys()).filter(roomID => validate(rooms) && version(roomID) === 4)
+    return Array.from(rooms.keys()).filter(roomID => validate(roomID) && version(roomID) === 4)
 }
 
 function shareRoomsInfo() {
@@ -20,7 +21,7 @@ function shareRoomsInfo() {
 }
 
 io.on('connection', socket => {
-    console.log('Socket connected ', socket.id)
+    shareRoomsInfo();
 
     socket.on(ACTIONS.JOIN, config => {
         const {room: roomID} = config;
@@ -39,7 +40,7 @@ io.on('connection', socket => {
             })
 
             socket.emit(ACTIONS.ADD_PEER, {
-                peerID: socket.id,
+                peerID: clientID,
                 createOffer: true
             })
         })
@@ -69,10 +70,27 @@ io.on('connection', socket => {
         })
 
         shareRoomsInfo();
+
+
+        console.log('Socket leave ', socket.id)
     }
 
     socket.on(ACTIONS.LEAVE, leaveRoom);
     socket.on('disconnecting', leaveRoom);
+
+    socket.on(ACTIONS.RELAY_SDP, ({peerID, sessionDescription}) => {
+        io.to(peerID).emit(ACTIONS.SESSION_DESCRIPTION, {
+            peerID: socket.id,
+            sessionDescription,
+        })
+    })
+
+    socket.on(ACTIONS.RELAY_ICE, ({peerID, iceCandidate}) => {
+        io.to(peerID).emit(ACTIONS.ICE_CANDIDATE, {
+            peerID: socket.id,
+            iceCandidate
+        })
+    })
 })
 
 server.listen(PORT, () => {

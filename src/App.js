@@ -7,9 +7,9 @@ function App() {
     return (
     <BrowserRouter>
       <Routes>
-          <Route path='/room/:id' element={<Room />}/>
-          <Route exact path='/' element={<Main />}/>
-          <Route path="*" element={<NotFound404 />}/>
+          <Route exact path='/room/:id' Component={Room}/>
+          <Route exact path='/' Component={Main}/>
+          <Route path="*" Component={NotFound404}/>
       </Routes>
     </BrowserRouter>
   );
