@@ -9,11 +9,15 @@ export const LOCAL_VIDEO = 'LOCAL_VIDEO'
 export default function useWebRTC(roomID) {
     const [clients, updateClients] = useStateWithCallback([])
 
-    const addNewClient = useCallback((newClient, cb) => {
-        if(!clients.includes(newClient)) {
-            updateClients(list => [...list, newClient], cb);
-        }
-    }, [clients, updateClients])
+  const addNewClient = useCallback((newClient, cb) => {
+    updateClients(list => {
+      if (!list.includes(newClient)) {
+        return [...list, newClient]
+      }
+
+      return list;
+    }, cb);
+  }, [clients, updateClients]);
 
     const peerConnections = useRef({});
     const localMediaStream = useRef(null);
@@ -45,8 +49,24 @@ export default function useWebRTC(roomID) {
                 tracksNumber++;
 
                 if (tracksNumber === 2) {
+                    tracksNumber = 0;
                     addNewClient(peerID, () => {
-                        peerMediaElements.current[peerID].srcObject = remoteStream
+                        if (peerMediaElements.current[peerID]) {
+                            peerMediaElements.current[peerID].srcObject = remoteStream;
+                        } else {
+                            // FIX LONG RENDER IN CASE OF MANY CLIENTS
+                            let settled = false;
+                            const interval = setInterval(() => {
+                                if (peerMediaElements.current[peerID]) {
+                                    peerMediaElements.current[peerID].srcObject = remoteStream;
+                                    settled = true;
+                                }
+
+                                if (settled) {
+                                    clearInterval(interval);
+                                }
+                            }, 1000);
+                        }
                     })
                 }
             }
@@ -66,18 +86,18 @@ export default function useWebRTC(roomID) {
                 })
             }
         }
-        socket.on(ACTIONS.ADD_PEER, handleNewPeer);
-    }, [])
 
-    useEffect(() => {
-        socket.on(ACTIONS.ICE_CANDIDATE, ({peerID, iceCandidate}) => {
-            peerConnections.current[peerID].addIceCandidate(new RTCIceCandidate(iceCandidate))
-        })
+        socket.on(ACTIONS.ADD_PEER, handleNewPeer);
+
+        return () => {
+            socket.off(ACTIONS.ADD_PEER);
+        }
     }, [])
 
     useEffect(() => {
         socket.on(ACTIONS.REMOVE_PEER, ({peerID}) => {
             if (peerConnections.current[peerID]) {
+                console.log(alert('close'))
                 peerConnections.current[peerID].close();
             }
 
@@ -90,7 +110,7 @@ export default function useWebRTC(roomID) {
 
     useEffect(() => {
         async function setRemoteMedia({peerID, sessionDescription: remoteDescription}) {
-            await peerConnections.current[peerID].setRemoteDescription(new RTCSessionDescription(remoteDescription))
+            await peerConnections.current[peerID]?.setRemoteDescription(new RTCSessionDescription(remoteDescription))
 
             if(remoteDescription.type === 'offer') {
                 const answer = await peerConnections.current[peerID].createAnswer();
@@ -105,13 +125,32 @@ export default function useWebRTC(roomID) {
         }
 
         socket.on(ACTIONS.SESSION_DESCRIPTION, setRemoteMedia)
+
+        return () => {
+            socket.off(ACTIONS.SESSION_DESCRIPTION);
+        }
+    }, [])
+
+    useEffect(() => {
+        socket.on(ACTIONS.ICE_CANDIDATE, ({peerID, iceCandidate}) => {
+            peerConnections.current[peerID].addIceCandidate(
+                new RTCIceCandidate(iceCandidate)
+            )
+        })
+
+        return () => {
+            socket.off(ACTIONS.ICE_CANDIDATE);
+        }
     }, [])
 
     useEffect(() => {
         async function startCapture() {
+            if (localMediaStream.current) {
+                return
+            }
+
             localMediaStream.current = await navigator.mediaDevices.getUserMedia({
                 audio: true,
-                //video: true,
                 video: {
                     width: 1280,
                     height: 720
@@ -133,9 +172,9 @@ export default function useWebRTC(roomID) {
             .catch((e) => console.error('Error getting userMedia:' , e));
 
         return () => {
-            localMediaStream.current?.getTracks().forEach(track => {
-                track.stop();
-            })
+            localMediaStream.current?.getTracks().forEach(track => track.stop())
+
+            localMediaStream.current = null;
 
             socket.emit(ACTIONS.LEAVE)
         }
@@ -145,5 +184,8 @@ export default function useWebRTC(roomID) {
         peerMediaElements.current[id] = node;
     }, [])
 
-    return {clients, provideMediaRef}
+    return {
+        clients,
+        provideMediaRef
+    }
 }
